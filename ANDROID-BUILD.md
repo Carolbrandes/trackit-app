@@ -37,6 +37,21 @@ eas build --platform android --profile production
 
 O build roda na nuvem. No final você recebe um link para **baixar o `.aab`** e subir na Google Play Console.
 
+### 3.1. Keystore Android (primeira vez)
+
+Na primeira vez que rodar o build, o EAS pergunta como assinar o app. Use o seguinte:
+
+| Pergunta | O que escolher |
+|----------|----------------|
+| **Generate a new Android Keystore?** / **New Android keystore?** | **Y** (Yes). O EAS cria um keystore novo e guarda nos servidores deles. É o mais simples. |
+| **Path to keystore** / **Would you like to upload your own?** | Se aparecer opção tipo “Generate new keystore” ou “Let EAS handle it”, escolha **gerar novo**. Se pedir *path* é porque você escolheu usar um keystore existente. |
+
+**Resumo:** para o primeiro build, em todas as perguntas sobre keystore escolha **gerar um novo** (ou “Yes” / “Generate new keystore”). Não precisa informar path de arquivo — o EAS gera e armazena o keystore para você. Nos próximos builds ele reutiliza esse mesmo keystore automaticamente.
+
+Se em algum momento aparecer um menu com opções como:
+- **Set up a new keystore** → escolha essa.
+- **Use existing** / **Upload** → só use se você já tiver um arquivo `.jks` ou `.keystore` de outro projeto.
+
 ### 4. (Opcional) Rodar no emulador / dispositivo via EAS
 
 Para testar sem SDK local você pode usar:
