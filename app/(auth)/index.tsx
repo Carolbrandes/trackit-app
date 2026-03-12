@@ -11,15 +11,18 @@ import {
   Alert,
   TextInput,
   Switch,
+  Platform,
 } from 'react-native';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Camera, Plus, Filter } from 'lucide-react-native';
+import { Camera, Plus, Filter, Pencil, Trash2 } from 'lucide-react-native';
 import { useThemeContext } from '../../src/contexts/ThemeContext';
 import { useTranslation } from '../../src/contexts/LanguageContext';
 import { useUserData } from '../../src/hooks/useUserData';
 import { useTransactions, type Transaction } from '../../src/hooks/useTransactions';
 import { useCurrency } from '../../src/hooks/useCurrency';
-import { formatCurrency, formatDate } from '../../src/utils/formatters';
+import { formatCurrency } from '../../src/utils/formatters';
+import { useDateFormat, type DateFormatPreference } from '../../src/contexts/DateFormatContext';
 import { deleteTransaction, updateTransaction, createTransaction, fetchCategories, createCategory, type ApiCategory, type UpdateTransactionPayload, type TransactionFilters } from '../../src/services/api';
 import { ExpandableCard, type ExpandableCardData } from '../../src/components/ExpandableCard';
 import { FilterModal } from '../../src/components/FilterModal';
@@ -123,20 +126,49 @@ function TransactionDetailModal({
   onDeleted: () => void;
   onUpdated: () => void;
 }) {
+  const { formatDate } = useDateFormat();
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [categories, setCategories] = useState<ApiCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editDesc, setEditDesc] = useState('');
   const [editAmount, setEditAmount] = useState('');
+  const [editDate, setEditDate] = useState('');
   const [editType, setEditType] = useState<'income' | 'expense'>('expense');
   const [editCategoryId, setEditCategoryId] = useState('');
   const [editFixed, setEditFixed] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const parseISODate = (str: string): Date => {
+    if (!str) return new Date();
+    const [y, m, d] = str.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+
+  const toISODate = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const displayDate = (str: string): string => {
+    if (!str) return '';
+    return formatDate(`${str}T00:00:00.000Z`, locale);
+  };
+
+  const txDateToISO = (date: Transaction['date']): string => {
+    if (!date) return toISODate(new Date());
+    const str = String(date);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    return toISODate(new Date(str));
+  };
 
   const resetForm = useCallback(() => {
     if (transaction) {
       setEditDesc(transaction.description);
       setEditAmount(String(transaction.amount));
+      setEditDate(txDateToISO(transaction.date));
       setEditType(transaction.type);
       setEditCategoryId(getCategoryId(transaction));
       setEditFixed(!!transaction.is_fixed);
@@ -148,6 +180,7 @@ function TransactionDetailModal({
     if (!transaction) return;
     setEditDesc(transaction.description);
     setEditAmount(String(transaction.amount));
+    setEditDate(txDateToISO(transaction.date));
     setEditType(transaction.type);
     setEditCategoryId(getCategoryId(transaction));
     setEditFixed(!!transaction.is_fixed);
@@ -174,6 +207,7 @@ function TransactionDetailModal({
         type: editType,
         category: editCategoryId,
         is_fixed: editFixed,
+        date: editDate || undefined,
       };
       await updateTransaction(transaction._id, payload);
       onUpdated();
@@ -289,6 +323,28 @@ function TransactionDetailModal({
                   placeholder="0.00"
                   placeholderTextColor={theme.colors.textSecondary}
                 />
+                <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>{t.transactions.date}</Text>
+                <TouchableOpacity
+                  style={[styles.dateButton, { backgroundColor: theme.colors.background, borderColor: theme.colors.gray300 }]}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={{ color: theme.colors.textPrimary, fontSize: 16 }}>
+                    {editDate ? displayDate(editDate) : ''}
+                  </Text>
+                </TouchableOpacity>
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={parseISODate(editDate)}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(_event: DateTimePickerEvent, selectedDate?: Date) => {
+                      setShowDatePicker(false);
+                      if (_event.type === 'set' && selectedDate) {
+                        setEditDate(toISODate(selectedDate));
+                      }
+                    }}
+                  />
+                )}
                 <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>{t.transactions.type}</Text>
                 <View style={styles.typeRow}>
                   <TouchableOpacity
@@ -340,11 +396,19 @@ function TransactionDetailModal({
   );
 }
 
+const DATE_FORMAT_OPTIONS: DateFormatPreference[] = ['mm/dd/yyyy', 'dd/mm/yyyy', 'long'];
+const DATE_FORMAT_LABELS: Record<DateFormatPreference, string> = {
+  'mm/dd/yyyy': 'MM/DD/YYYY',
+  'dd/mm/yyyy': 'DD/MM/YYYY',
+  long: '1 Jan 2026',
+};
+
 export default function TransactionsScreen() {
   const { theme } = useThemeContext();
   const { t, locale } = useTranslation();
   const { user, isLoading: userLoading } = useUserData();
   const { selectedCurrencyCode } = useCurrency();
+  const { dateFormat, setDateFormat, formatDate } = useDateFormat();
 
   const [page, setPage] = useState(1);
   const currentDate = new Date();
@@ -355,6 +419,7 @@ export default function TransactionsScreen() {
     endDate: new Date(year, month, 0).toISOString().slice(0, 10),
   };
   const [filters, setFilters] = useState<TransactionFilters>(defaultFilters);
+  const [activeQuickFilter, setActiveQuickFilter] = useState<string>('thisMonth');
 
   const {
     transactions,
@@ -438,6 +503,46 @@ export default function TransactionsScreen() {
       startDate: new Date(y, m - 1, 1).toISOString().slice(0, 10),
       endDate: new Date(y, m, 0).toISOString().slice(0, 10),
     });
+    setActiveQuickFilter('thisMonth');
+  };
+
+  const applyQuickFilter = (key: string) => {
+    const now = new Date();
+    let endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    let startDate: string;
+
+    switch (key) {
+      case 'lastMonth': {
+        const s = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        startDate = s.toISOString().slice(0, 10);
+        endDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
+        break;
+      }
+      case 'threeMonths': {
+        const d = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        startDate = d.toISOString().slice(0, 10);
+        break;
+      }
+      case 'sixMonths': {
+        const d = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+        startDate = d.toISOString().slice(0, 10);
+        break;
+      }
+      case 'oneYear': {
+        const d = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+        startDate = d.toISOString().slice(0, 10);
+        break;
+      }
+      default: {
+        const d = new Date(now.getFullYear(), now.getMonth(), 1);
+        startDate = d.toISOString().slice(0, 10);
+        break;
+      }
+    }
+
+    setActiveQuickFilter(key);
+    setFilters({ startDate, endDate });
+    setPage(1);
   };
 
   if (userLoading || !user) {
@@ -488,6 +593,55 @@ export default function TransactionsScreen() {
           t={t}
         />
 
+        <View style={styles.dateFormatRow}>
+          {DATE_FORMAT_OPTIONS.map((fmt) => {
+            const isActive = dateFormat === fmt;
+            return (
+              <TouchableOpacity
+                key={fmt}
+                style={[
+                  styles.dateFormatChip,
+                  {
+                    backgroundColor: isActive ? theme.colors.primary : theme.colors.surface,
+                    borderColor: isActive ? theme.colors.primary : theme.colors.gray300,
+                  },
+                ]}
+                onPress={() => setDateFormat(fmt)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.dateFormatText, { color: isActive ? '#fff' : theme.colors.textPrimary }]}>
+                  {DATE_FORMAT_LABELS[fmt]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickFilterScroll} contentContainerStyle={styles.quickFilterContent}>
+          {(['thisMonth', 'lastMonth', 'threeMonths', 'sixMonths', 'oneYear'] as const).map((key) => {
+            const labels: Record<string, string> = {
+              thisMonth: t.quickFilters.thisMonth,
+              lastMonth: t.quickFilters.lastMonth,
+              threeMonths: t.quickFilters.threeMonths,
+              sixMonths: t.quickFilters.sixMonths,
+              oneYear: t.quickFilters.oneYear,
+            };
+            const isActive = activeQuickFilter === key;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[styles.quickFilterChip, isActive && { backgroundColor: theme.colors.primary }]}
+                onPress={() => applyQuickFilter(key)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.quickFilterText, { color: isActive ? '#fff' : theme.colors.textPrimary }]}>
+                  {labels[key]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
         <View style={styles.filterRow}>
           <TouchableOpacity
             style={[styles.filterButton, { backgroundColor: theme.colors.secondary }]}
@@ -513,6 +667,7 @@ export default function TransactionsScreen() {
               description: tx.description,
               dateFull: formatDate(String(tx.date), locale),
               descriptionLong: tx.description,
+              isFixed: !!tx.is_fixed,
               details: [
                 { label: t.transactions.type, value: tx.type === 'income' ? t.transactions.income : t.transactions.expense },
                 { label: t.transactions.amount, value: formatCurrency(tx.amount, selectedCurrencyCode, locale) },
@@ -570,7 +725,7 @@ export default function TransactionsScreen() {
           visible={filterModalVisible}
           filters={filters}
           categories={categories}
-          onApply={(f) => setFilters(f)}
+          onApply={(f) => { setFilters(f); setActiveQuickFilter(''); }}
           onClose={() => setFilterModalVisible(false)}
           onReset={handleFilterReset}
         />
@@ -697,6 +852,41 @@ const styles = StyleSheet.create({
   summaryValueNegative: { fontSize: 14, fontWeight: '700' },
   summaryValueBalance: { fontSize: 14, fontWeight: '700' },
   summaryCount: { fontSize: 14, fontWeight: '600' },
+  dateFormatRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  dateFormatChip: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  dateFormatText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  quickFilterScroll: {
+    marginBottom: 8,
+    maxHeight: 44,
+  },
+  quickFilterContent: {
+    gap: 8,
+    paddingRight: 4,
+  },
+  quickFilterChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  quickFilterText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   filterRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -857,6 +1047,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
+    marginBottom: 14,
+  },
+  dateButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     marginBottom: 14,
   },
   typeRow: {

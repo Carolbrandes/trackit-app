@@ -1,16 +1,19 @@
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import React from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
   Modal,
-  TouchableOpacity,
-  TextInput,
+  Platform,
   ScrollView,
+  StyleSheet,
   Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { useDateFormat } from '../contexts/DateFormatContext';
 import type { TransactionFilters, ApiCategory } from '../services/api';
 
 interface FilterModalProps {
@@ -31,7 +34,31 @@ export function FilterModal({
   onReset,
 }: FilterModalProps) {
   const { theme } = useThemeContext();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const { formatDate } = useDateFormat();
+
+  const [showStartPicker, setShowStartPicker] = React.useState(false);
+  const [showEndPicker, setShowEndPicker] = React.useState(false);
+
+  const parseISODate = (str: string): Date => {
+    if (str) {
+      const [y, m, d] = str.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    return new Date();
+  };
+
+  const toISODate = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const displayDate = (str: string): string => {
+    if (!str) return '';
+    return formatDate(`${str}T00:00:00.000Z`, locale);
+  };
 
   const [description, setDescription] = React.useState(filters.description ?? '');
   const [category, setCategory] = React.useState(filters.category ?? '');
@@ -146,21 +173,49 @@ export function FilterModal({
             </View>
 
             <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.startDate}</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
-              value={startDate}
-              onChangeText={setStartDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
+            <TouchableOpacity
+              style={[styles.dateButton, { backgroundColor: theme.colors.background, borderColor: theme.colors.gray300 }]}
+              onPress={() => setShowStartPicker(true)}
+            >
+              <Text style={{ color: startDate ? theme.colors.textPrimary : theme.colors.textSecondary, fontSize: 16 }}>
+                {startDate ? displayDate(startDate) : t.filter.startDate}
+              </Text>
+            </TouchableOpacity>
+            {showStartPicker && (
+              <DateTimePicker
+                value={parseISODate(startDate)}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(_event: DateTimePickerEvent, selectedDate?: Date) => {
+                  setShowStartPicker(false);
+                  if (_event.type === 'set' && selectedDate) {
+                    setStartDate(toISODate(selectedDate));
+                  }
+                }}
+              />
+            )}
             <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.endDate}</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
-              value={endDate}
-              onChangeText={setEndDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
+            <TouchableOpacity
+              style={[styles.dateButton, { backgroundColor: theme.colors.background, borderColor: theme.colors.gray300 }]}
+              onPress={() => setShowEndPicker(true)}
+            >
+              <Text style={{ color: endDate ? theme.colors.textPrimary : theme.colors.textSecondary, fontSize: 16 }}>
+                {endDate ? displayDate(endDate) : t.filter.endDate}
+              </Text>
+            </TouchableOpacity>
+            {showEndPicker && (
+              <DateTimePicker
+                value={parseISODate(endDate)}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(_event: DateTimePickerEvent, selectedDate?: Date) => {
+                  setShowEndPicker(false);
+                  if (_event.type === 'set' && selectedDate) {
+                    setEndDate(toISODate(selectedDate));
+                  }
+                }}
+              />
+            )}
             <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.minAmount}</Text>
             <TextInput
               style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
@@ -240,6 +295,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
+  },
+  dateButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   chipRow: {
     marginVertical: 8,

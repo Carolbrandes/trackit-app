@@ -24,6 +24,8 @@ export interface ExpandableCardData {
   descriptionLong?: string;
   /** Extra details to show when expanded (e.g. type, amount, fixed) */
   details?: { label: string; value: string }[];
+  /** Whether this is a fixed/recurring transaction */
+  isFixed?: boolean;
 }
 
 interface ExpandableCardProps {
@@ -98,9 +100,12 @@ export function ExpandableCard({
       {/* Header: title + category + description (2 lines) + amount + Ver mais */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Text style={[styles.title, { color: theme.colors.textPrimary }]} numberOfLines={1}>
-            {data.title}
-          </Text>
+          <View style={styles.titleRow}>
+            {data.isFixed && <Text style={styles.fixedIcon}>🔁</Text>}
+            <Text style={[styles.title, { color: theme.colors.textPrimary }]} numberOfLines={1}>
+              {data.title}
+            </Text>
+          </View>
           {amountText != null && (
             <Text style={[styles.amount, { color: amountColor ?? theme.colors.textPrimary }]} numberOfLines={1}>
               {amountText}
@@ -166,11 +171,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+    gap: 6,
+  },
+  fixedIcon: {
+    fontSize: 14,
+  },
   title: {
     fontSize: 17,
     fontWeight: '700',
     flex: 1,
-    marginRight: 8,
   },
   amount: {
     fontSize: 16,

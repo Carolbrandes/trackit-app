@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
+  LayoutAnimation,
   Platform,
+  UIManager,
   ScrollView,
 } from 'react-native';
 import {
@@ -20,10 +22,16 @@ import {
   Zap,
   RefreshCw,
   CheckCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react-native';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { fetchInsights, type InsightsData } from '../services/api';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const cardShadow = Platform.select({
   ios: {
@@ -46,12 +54,14 @@ export function AiInsightsSection() {
   const { theme } = useThemeContext();
   const { t, locale } = useTranslation();
   const insights = t.insights;
+  const [expanded, setExpanded] = useState(false);
+  const [hasFetched, setHasFetched] = useState(false);
   const [data, setData] = useState<InsightsData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const spinAnim = useRef(new Animated.Value(0)).current;
 
-  const fetchInsightsData = async () => {
+  const fetchInsightsData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
@@ -75,12 +85,20 @@ export function AiInsightsSection() {
       setData(null);
     } finally {
       setIsLoading(false);
+      setHasFetched(true);
     }
-  };
+  }, [locale, insights]);
 
-  useEffect(() => {
-    fetchInsightsData();
-  }, []);
+  const toggleExpanded = useCallback(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded((prev) => {
+      const next = !prev;
+      if (next && !hasFetched) {
+        fetchInsightsData();
+      }
+      return next;
+    });
+  }, [hasFetched, fetchInsightsData]);
 
   useEffect(() => {
     if (!isLoading) return;
@@ -100,26 +118,37 @@ export function AiInsightsSection() {
     outputRange: ['0deg', '360deg'],
   });
 
+  const ChevronIcon = expanded ? ChevronUp : ChevronDown;
+
   return (
     <View style={styles.panel}>
-      <View style={[styles.header, { borderBottomColor: theme.colors.gray300 }]}>
+      <TouchableOpacity
+        style={[styles.header, { borderBottomColor: expanded ? theme.colors.gray300 : 'transparent' }]}
+        onPress={toggleExpanded}
+        activeOpacity={0.7}
+      >
         <View style={styles.titleRow}>
           <Cpu size={20} color={theme.colors.primary} />
           <Text style={[styles.sectionTitle, { color: theme.colors.textPrimary }]}>{insights.title}</Text>
         </View>
-        <TouchableOpacity
-          onPress={fetchInsightsData}
-          disabled={isLoading}
-          style={[styles.refreshButton, { opacity: isLoading ? 0.7 : 1 }]}
-          accessibilityLabel={insights.generateButton}
-        >
-          <Animated.View style={{ transform: [{ rotate: spin }] }}>
-            <RefreshCw size={18} color={theme.colors.primary} />
-          </Animated.View>
-        </TouchableOpacity>
-      </View>
+        <View style={styles.headerActions}>
+          {expanded && (
+            <TouchableOpacity
+              onPress={fetchInsightsData}
+              disabled={isLoading}
+              style={[styles.refreshButton, { opacity: isLoading ? 0.7 : 1 }]}
+              accessibilityLabel={insights.generateButton}
+            >
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <RefreshCw size={18} color={theme.colors.primary} />
+              </Animated.View>
+            </TouchableOpacity>
+          )}
+          <ChevronIcon size={20} color={theme.colors.textSecondary} />
+        </View>
+      </TouchableOpacity>
 
-      {isLoading && (
+      {expanded && isLoading && (
         <View style={[styles.card, { backgroundColor: theme.colors.surface }, cardShadow]}>
           <View style={styles.loadingRow}>
             <ActivityIndicator size="large" color={theme.colors.primary} />
@@ -128,13 +157,13 @@ export function AiInsightsSection() {
         </View>
       )}
 
-      {error && !isLoading && (
+      {expanded && error && !isLoading && (
         <View style={[styles.card, styles.errorCard, { backgroundColor: theme.colors.surface }, cardShadow]}>
           <Text style={[styles.errorText, { color: theme.colors.danger }]}>{error}</Text>
         </View>
       )}
 
-      {data && !isLoading && (
+      {expanded && data && !isLoading && (
         <ScrollView style={styles.insightsScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled>
           <View style={styles.grid}>
             <View style={[styles.insightCard, { backgroundColor: theme.colors.surface }, cardShadow]}>
@@ -338,6 +367,11 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   refreshButton: {
     padding: 8,

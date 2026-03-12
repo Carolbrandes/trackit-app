@@ -200,6 +200,7 @@ export interface UpdateTransactionPayload {
   type: 'expense' | 'income';
   category: string;
   is_fixed?: boolean | null;
+  date?: string;
 }
 
 export async function updateTransaction(

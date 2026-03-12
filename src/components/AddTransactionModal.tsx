@@ -1,16 +1,19 @@
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
   Modal,
-  TouchableOpacity,
-  TextInput,
+  Platform,
   ScrollView,
+  StyleSheet,
   Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { useDateFormat } from '../contexts/DateFormatContext';
 import { createTransaction, type ApiCategory } from '../services/api';
 
 interface AddTransactionModalProps {
@@ -29,7 +32,23 @@ export function AddTransactionModal({
   onSuccess,
 }: AddTransactionModalProps) {
   const { theme } = useThemeContext();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const { formatDate } = useDateFormat();
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const parseISODate = (str: string): Date => {
+    const [y, m, d] = str.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+
+  const toISODate = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const displayDate = (str: string): string => formatDate(`${str}T00:00:00.000Z`, locale);
 
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
@@ -128,13 +147,27 @@ export function AddTransactionModal({
               placeholderTextColor={theme.colors.textSecondary}
             />
             <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.date}</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
-              value={date}
-              onChangeText={setDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
+            <TouchableOpacity
+              style={[styles.dateButton, { backgroundColor: theme.colors.background, borderColor: theme.colors.gray300 }]}
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Text style={{ color: theme.colors.textPrimary, fontSize: 16 }}>
+                {displayDate(date)}
+              </Text>
+            </TouchableOpacity>
+            {showDatePicker && (
+              <DateTimePicker
+                value={parseISODate(date)}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(_event: DateTimePickerEvent, selectedDate?: Date) => {
+                  setShowDatePicker(false);
+                  if (_event.type === 'set' && selectedDate) {
+                    setDate(toISODate(selectedDate));
+                  }
+                }}
+              />
+            )}
             <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.type}</Text>
             <View style={styles.typeRow}>
               <TouchableOpacity
@@ -226,6 +259,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
+  },
+  dateButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   typeRow: {
     flexDirection: 'row',
