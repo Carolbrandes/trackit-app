@@ -55,7 +55,6 @@ export function AiInsightsSection() {
   const { t, locale } = useTranslation();
   const insights = t.insights;
   const [expanded, setExpanded] = useState(false);
-  const [hasFetched, setHasFetched] = useState(false);
   const [data, setData] = useState<InsightsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,20 +84,17 @@ export function AiInsightsSection() {
       setData(null);
     } finally {
       setIsLoading(false);
-      setHasFetched(true);
     }
   }, [locale, insights]);
 
+  useEffect(() => {
+    fetchInsightsData();
+  }, [fetchInsightsData]);
+
   const toggleExpanded = useCallback(() => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpanded((prev) => {
-      const next = !prev;
-      if (next && !hasFetched) {
-        fetchInsightsData();
-      }
-      return next;
-    });
-  }, [hasFetched, fetchInsightsData]);
+    setExpanded((prev) => !prev);
+  }, []);
 
   useEffect(() => {
     if (!isLoading) return;

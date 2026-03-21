@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   Modal,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   TextInput,
   Image,
   ActivityIndicator,
@@ -16,11 +17,11 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Camera, X, Check } from 'lucide-react-native';
+import { Camera, X, Check, ChevronDown } from 'lucide-react-native';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
-import { parseReceipt, parseReceiptWithFile, type ParsedReceipt, type ParsedReceiptItem } from '../services/api';
-import type { ApiCategory } from '../services/api';
+import { parseReceipt, parseReceiptWithFile, type ParsedReceipt, type ParsedReceiptItem, type ApiCategory } from '../services/api';
+import { sanitizeReceiptItems } from '../utils/receiptSanitizer';
 
 type SaveMode = 'items' | 'total';
 type Step = 'upload' | 'processing' | 'review';
@@ -74,6 +75,7 @@ export function ReceiptScannerModal({
   const [mode, setMode] = useState<SaveMode>('total');
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
   const [categoryId, setCategoryId] = useState('');
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
   const [transactionType, setTransactionType] = useState<'expense' | 'income'>('expense');
   const [totalDescription, setTotalDescription] = useState('');
   const [editedItems, setEditedItems] = useState<ParsedReceiptItem[]>([]);
@@ -90,6 +92,7 @@ export function ReceiptScannerModal({
     setMode('total');
     setSelectedItems(new Set());
     setCategoryId('');
+    setCategoryPickerVisible(false);
     setTransactionType('expense');
     setTotalDescription('');
     setEditedItems([]);
@@ -164,12 +167,15 @@ export function ReceiptScannerModal({
         return;
       }
       if (parseResult.data) {
-        setReceipt(parseResult.data);
-        setDetectedCurrency(parseResult.data.currency ?? '');
+        const currency = parseResult.data.currency ?? 'BRL';
+        // Defensive sanitization pass after receiving API response
+        const sanitizedItems = sanitizeReceiptItems(parseResult.data.items, currency);
+        setReceipt({ ...parseResult.data, items: sanitizedItems });
+        setDetectedCurrency(currency);
         setTransactionType(parseResult.data.type);
         setTotalDescription(parseResult.data.storeName ?? '');
-        setEditedItems([...parseResult.data.items]);
-        setSelectedItems(new Set(parseResult.data.items.map((_, i) => i)));
+        setEditedItems(sanitizedItems);
+        setSelectedItems(new Set(sanitizedItems.map((_, i) => i)));
         const matchedId = findBestCategoryMatch(parseResult.data.suggestedCategory, categories);
         setCategoryId(matchedId ?? categories[0]?._id ?? '');
         setStep('review');
@@ -181,19 +187,11 @@ export function ReceiptScannerModal({
   };
 
   const showImageSourcePicker = () => {
-    if (Platform.OS === 'ios') {
-      Alert.alert(scan.title, scan.uploadText, [
-        { text: t.editModal.cancel, style: 'cancel' },
-        { text: 'Gallery', onPress: () => pickImage(false) },
-        { text: 'Camera', onPress: () => pickImage(true) },
-      ]);
-    } else {
-      Alert.alert(scan.title, scan.uploadText, [
-        { text: t.editModal.cancel, style: 'cancel' },
-        { text: 'Gallery', onPress: () => pickImage(false) },
-        { text: 'Camera', onPress: () => pickImage(true) },
-      ]);
-    }
+    Alert.alert(scan.title, scan.uploadText, [
+      { text: t.editModal.cancel, style: 'cancel' },
+      { text: 'Gallery', onPress: () => pickImage(false) },
+      { text: 'Camera', onPress: () => pickImage(true) },
+    ]);
   };
 
   const toggleItem = (index: number) => {
@@ -267,213 +265,289 @@ export function ReceiptScannerModal({
     }
   };
 
-  const onDateChange = (_: any, date?: Date) => {
+  const onDateChange = (_: unknown, date?: Date) => {
     setShowDatePicker(Platform.OS === 'ios');
     if (date) setTransactionDate(date);
   };
 
+  const selectedCategory = categories.find((c) => c._id === categoryId);
+
+  const renderCategoryItem = useCallback(
+    ({ item }: { item: ApiCategory }) => {
+      const isSelected = item._id === categoryId;
+      return (
+        <TouchableOpacity
+          style={[
+            styles.pickerItem,
+            { borderBottomColor: theme.colors.gray300 },
+            isSelected && { backgroundColor: theme.colors.secondary },
+          ]}
+          onPress={() => {
+            setCategoryId(item._id);
+            setCategoryPickerVisible(false);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.pickerItemText, { color: theme.colors.textPrimary }]}>
+            {item.name}
+          </Text>
+          {isSelected && <Check size={18} color={theme.colors.primary} />}
+        </TouchableOpacity>
+      );
+    },
+    [categoryId, theme]
+  );
+
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
-        <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
-          <View style={[styles.header, { borderBottomColor: theme.colors.gray300 }]}>
-            <View style={styles.headerTitleRow}>
-              <Camera size={20} color={theme.colors.primary} />
-              <Text style={[styles.headerTitle, { color: theme.colors.textPrimary }]}>{scan.title}</Text>
+    <>
+      <Modal visible={visible} animationType="slide" transparent>
+        <View style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+          <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
+            <View style={[styles.header, { borderBottomColor: theme.colors.gray300 }]}>
+              <View style={styles.headerTitleRow}>
+                <Camera size={20} color={theme.colors.primary} />
+                <Text style={[styles.headerTitle, { color: theme.colors.textPrimary }]}>{scan.title}</Text>
+              </View>
+              <TouchableOpacity onPress={handleClose} hitSlop={12}>
+                <X size={22} color={theme.colors.textPrimary} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={handleClose} hitSlop={12}>
+
+            <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
+              {error ? (
+                <View style={[styles.errorBox, { backgroundColor: theme.colors.danger + '20' }]}>
+                  <Text style={[styles.errorText, { color: theme.colors.danger }]}>{error}</Text>
+                </View>
+              ) : null}
+
+              {step === 'upload' && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.uploadArea, { borderColor: theme.colors.gray300 }]}
+                    onPress={showImageSourcePicker}
+                    activeOpacity={0.8}
+                  >
+                    <Camera size={40} color={theme.colors.primary} />
+                    <Text style={[styles.uploadText, { color: theme.colors.textPrimary }]}>{scan.uploadText}</Text>
+                    <Text style={[styles.uploadHint, { color: theme.colors.textSecondary }]}>{scan.uploadHint}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.secondaryButton, { borderColor: theme.colors.gray300 }]} onPress={handleClose}>
+                    <Text style={[styles.secondaryButtonText, { color: theme.colors.textPrimary }]}>{t.editModal.cancel}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {step === 'processing' && (
+                <View style={styles.processingRow}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={[styles.processingText, { color: theme.colors.textPrimary }]}>{scan.processing}</Text>
+                  {previewUri ? <Image source={{ uri: previewUri }} style={styles.previewImage} resizeMode="cover" /> : null}
+                </View>
+              )}
+
+              {step === 'review' && receipt && (
+                <>
+                  {previewUri ? <Image source={{ uri: previewUri }} style={styles.previewImage} resizeMode="cover" /> : null}
+                  <View style={[styles.receiptInfo, { backgroundColor: theme.colors.background }]}>
+                    <Text style={[styles.storeName, { color: theme.colors.textPrimary }]}>{receipt.storeName}</Text>
+                    <Text style={[styles.receiptMeta, { color: theme.colors.textSecondary }]}>{receipt.date}</Text>
+                    <Text style={[styles.receiptTotal, { color: theme.colors.textPrimary }]}>
+                      Total: {currencyToUse} {receipt.total.toFixed(2)}
+                    </Text>
+                    {receipt.suggestedCategory ? (
+                      <Text style={[styles.suggestedCat, { color: theme.colors.textSecondary }]}>
+                        {scan.suggestedCategory}: {receipt.suggestedCategory}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.date}</Text>
+                  <TouchableOpacity
+                    style={[styles.dateTouch, { backgroundColor: theme.colors.background, borderColor: theme.colors.gray300 }]}
+                    onPress={() => setShowDatePicker(true)}
+                  >
+                    <Text style={{ color: theme.colors.textPrimary }}>
+                      {transactionDate.toISOString().slice(0, 10)}
+                    </Text>
+                  </TouchableOpacity>
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={transactionDate}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={onDateChange}
+                    />
+                  )}
+
+                  <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.type}</Text>
+                  <View style={styles.typeRow}>
+                    <TouchableOpacity
+                      style={[styles.typeBtn, transactionType === 'expense' && { backgroundColor: theme.colors.danger }]}
+                      onPress={() => setTransactionType('expense')}
+                    >
+                      <Text style={[styles.typeBtnText, { color: transactionType === 'expense' ? '#fff' : theme.colors.textPrimary }]}>
+                        {t.transactions.expense}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.typeBtn, transactionType === 'income' && { backgroundColor: theme.colors.success }]}
+                      onPress={() => setTransactionType('income')}
+                    >
+                      <Text style={[styles.typeBtnText, { color: transactionType === 'income' ? '#fff' : theme.colors.textPrimary }]}>
+                        {t.transactions.income}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {receipt.items.length > 1 && (
+                    <>
+                      <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{scan.saveAs}</Text>
+                      <View style={styles.modeRow}>
+                        <TouchableOpacity
+                          style={[styles.modeBtn, mode === 'total' && { backgroundColor: theme.colors.primary }]}
+                          onPress={() => setMode('total')}
+                        >
+                          <Text style={[styles.modeBtnText, { color: mode === 'total' ? '#fff' : theme.colors.textPrimary }]}>{scan.modeTotal}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.modeBtn, mode === 'items' && { backgroundColor: theme.colors.primary }]}
+                          onPress={() => setMode('items')}
+                        >
+                          <Text style={[styles.modeBtnText, { color: mode === 'items' ? '#fff' : theme.colors.textPrimary }]}>{scan.modeItems}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
+
+                  {mode === 'total' && (
+                    <>
+                      <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.description}</Text>
+                      <TextInput
+                        style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
+                        value={totalDescription}
+                        onChangeText={setTotalDescription}
+                        placeholder={scan.receiptPurchase}
+                        placeholderTextColor={theme.colors.textSecondary}
+                      />
+                    </>
+                  )}
+
+                  {mode === 'items' && (
+                    <>
+                      <Text style={[styles.selectedCount, { color: theme.colors.textPrimary }]}>
+                        {scan.selectedCount.replace('{selected}', String(selectedItems.size)).replace('{total}', String(receipt.items.length))}{' '}
+                        <Text style={styles.linkText} onPress={toggleAllItems}>
+                          {selectedItems.size === receipt.items.length ? scan.deselectAll : scan.selectAll}
+                        </Text>
+                      </Text>
+                      <ScrollView style={styles.itemsList} nestedScrollEnabled>
+                        {editedItems.map((item, i) => (
+                          <TouchableOpacity
+                            key={`${i}-${item.amount}`}
+                            style={[
+                              styles.itemCard,
+                              { borderColor: theme.colors.gray300, backgroundColor: selectedItems.has(i) ? theme.colors.secondary : theme.colors.background },
+                            ]}
+                            onPress={() => toggleItem(i)}
+                            activeOpacity={0.8}
+                          >
+                            <View style={[styles.itemCheckbox, selectedItems.has(i) && { backgroundColor: theme.colors.primary }]}>
+                              {selectedItems.has(i) ? <Check size={14} color="#fff" /> : null}
+                            </View>
+                            <View style={styles.itemDetails}>
+                              <TextInput
+                                style={[styles.itemInput, { color: theme.colors.textPrimary }]}
+                                value={item.description}
+                                onChangeText={(v) => updateItemDescription(i, v)}
+                                onPressIn={(e) => e.stopPropagation()}
+                              />
+                              {item.quantity != null && item.quantity > 1 ? (
+                                <Text style={[styles.itemQty, { color: theme.colors.textSecondary }]}>x{item.quantity}</Text>
+                              ) : null}
+                            </View>
+                            <Text style={[styles.itemAmount, { color: theme.colors.textPrimary }]}>
+                              {currencyToUse} {(item.amount * (item.quantity ?? 1)).toFixed(2)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </>
+                  )}
+
+                  {/* Full-screen category picker trigger */}
+                  <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.category}</Text>
+                  <TouchableOpacity
+                    style={[styles.categorySelector, { backgroundColor: theme.colors.background, borderColor: theme.colors.gray300 }]}
+                    onPress={() => setCategoryPickerVisible(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.categorySelectorText, { color: selectedCategory ? theme.colors.textPrimary : theme.colors.textSecondary }]}>
+                      {selectedCategory ? selectedCategory.name : scan.selectCategory}
+                    </Text>
+                    <ChevronDown size={18} color={theme.colors.textSecondary} />
+                  </TouchableOpacity>
+
+                  <View style={styles.fixedRow}>
+                    <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.fixedTransaction}</Text>
+                    <Switch
+                      value={isFixed}
+                      onValueChange={setIsFixed}
+                      trackColor={{ false: theme.colors.gray300, true: theme.colors.primary }}
+                      thumbColor="#fff"
+                    />
+                  </View>
+
+                  <View style={styles.buttonRow}>
+                    <TouchableOpacity
+                      style={[styles.primaryButton, { backgroundColor: theme.colors.primary }]}
+                      onPress={handleSave}
+                      disabled={isSaving}
+                    >
+                      <Text style={styles.primaryButtonText}>
+                        {isSaving ? t.common.processing : scan.saveButton}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.secondaryButton, { borderColor: theme.colors.gray300 }]} onPress={reset}>
+                      <Text style={[styles.secondaryButtonText, { color: theme.colors.textPrimary }]}>{scan.scanAnother}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Full-screen category picker modal */}
+      <Modal
+        visible={categoryPickerVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setCategoryPickerVisible(false)}
+      >
+        <View style={[styles.pickerModal, { backgroundColor: theme.colors.background }]}>
+          <View style={[styles.pickerHeader, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.gray300 }]}>
+            <Text style={[styles.pickerTitle, { color: theme.colors.textPrimary }]}>
+              {scan.categoryPickerTitle}
+            </Text>
+            <TouchableOpacity onPress={() => setCategoryPickerVisible(false)} hitSlop={12}>
               <X size={22} color={theme.colors.textPrimary} />
             </TouchableOpacity>
           </View>
-
-          <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-            {error ? (
-              <View style={[styles.errorBox, { backgroundColor: theme.colors.danger + '20' }]}>
-                <Text style={[styles.errorText, { color: theme.colors.danger }]}>{error}</Text>
-              </View>
-            ) : null}
-
-            {step === 'upload' && (
-              <>
-                <TouchableOpacity
-                  style={[styles.uploadArea, { borderColor: theme.colors.gray300 }]}
-                  onPress={showImageSourcePicker}
-                  activeOpacity={0.8}
-                >
-                  <Camera size={40} color={theme.colors.primary} />
-                  <Text style={[styles.uploadText, { color: theme.colors.textPrimary }]}>{scan.uploadText}</Text>
-                  <Text style={[styles.uploadHint, { color: theme.colors.textSecondary }]}>{scan.uploadHint}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.secondaryButton, { borderColor: theme.colors.gray300 }]} onPress={handleClose}>
-                  <Text style={[styles.secondaryButtonText, { color: theme.colors.textPrimary }]}>{t.editModal.cancel}</Text>
-                </TouchableOpacity>
-              </>
+          <FlatList
+            data={categories}
+            keyExtractor={(item) => item._id}
+            renderItem={renderCategoryItem}
+            contentContainerStyle={styles.pickerList}
+            ItemSeparatorComponent={() => (
+              <View style={[styles.pickerSeparator, { backgroundColor: theme.colors.gray300 }]} />
             )}
-
-            {step === 'processing' && (
-              <View style={styles.processingRow}>
-                <ActivityIndicator size="large" color={theme.colors.primary} />
-                <Text style={[styles.processingText, { color: theme.colors.textPrimary }]}>{scan.processing}</Text>
-                {previewUri ? <Image source={{ uri: previewUri }} style={styles.previewImage} resizeMode="cover" /> : null}
-              </View>
-            )}
-
-            {step === 'review' && receipt && (
-              <>
-                {previewUri ? <Image source={{ uri: previewUri }} style={styles.previewImage} resizeMode="cover" /> : null}
-                <View style={[styles.receiptInfo, { backgroundColor: theme.colors.background }]}>
-                  <Text style={[styles.storeName, { color: theme.colors.textPrimary }]}>{receipt.storeName}</Text>
-                  <Text style={[styles.receiptMeta, { color: theme.colors.textSecondary }]}>{receipt.date}</Text>
-                  <Text style={[styles.receiptTotal, { color: theme.colors.textPrimary }]}>
-                    Total: {currencyToUse} {receipt.total.toFixed(2)}
-                  </Text>
-                  {receipt.suggestedCategory ? (
-                    <Text style={[styles.suggestedCat, { color: theme.colors.textSecondary }]}>
-                      {scan.suggestedCategory}: {receipt.suggestedCategory}
-                    </Text>
-                  ) : null}
-                </View>
-
-                <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.date}</Text>
-                <TouchableOpacity style={[styles.dateTouch, { backgroundColor: theme.colors.background, borderColor: theme.colors.gray300 }]} onPress={() => setShowDatePicker(true)}>
-                  <Text style={{ color: theme.colors.textPrimary }}>
-                    {transactionDate.toISOString().slice(0, 10)}
-                  </Text>
-                </TouchableOpacity>
-                {showDatePicker && (
-                  <DateTimePicker
-                    value={transactionDate}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={onDateChange}
-                  />
-                )}
-
-                <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.type}</Text>
-                <View style={styles.typeRow}>
-                  <TouchableOpacity
-                    style={[styles.typeBtn, transactionType === 'expense' && { backgroundColor: theme.colors.danger }]}
-                    onPress={() => setTransactionType('expense')}
-                  >
-                    <Text style={[styles.typeBtnText, { color: transactionType === 'expense' ? '#fff' : theme.colors.textPrimary }]}>{t.transactions.expense}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.typeBtn, transactionType === 'income' && { backgroundColor: theme.colors.success }]}
-                    onPress={() => setTransactionType('income')}
-                  >
-                    <Text style={[styles.typeBtnText, { color: transactionType === 'income' ? '#fff' : theme.colors.textPrimary }]}>{t.transactions.income}</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {receipt.items.length > 1 && (
-                  <>
-                    <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{scan.saveAs}</Text>
-                    <View style={styles.modeRow}>
-                      <TouchableOpacity
-                        style={[styles.modeBtn, mode === 'total' && { backgroundColor: theme.colors.primary }]}
-                        onPress={() => setMode('total')}
-                      >
-                        <Text style={[styles.modeBtnText, { color: mode === 'total' ? '#fff' : theme.colors.textPrimary }]}>{scan.modeTotal}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.modeBtn, mode === 'items' && { backgroundColor: theme.colors.primary }]}
-                        onPress={() => setMode('items')}
-                      >
-                        <Text style={[styles.modeBtnText, { color: mode === 'items' ? '#fff' : theme.colors.textPrimary }]}>{scan.modeItems}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </>
-                )}
-
-                {mode === 'total' && (
-                  <>
-                    <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.description}</Text>
-                    <TextInput
-                      style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
-                      value={totalDescription}
-                      onChangeText={setTotalDescription}
-                      placeholder={scan.receiptPurchase}
-                      placeholderTextColor={theme.colors.textSecondary}
-                    />
-                  </>
-                )}
-
-                {mode === 'items' && (
-                  <>
-                    <Text style={[styles.selectedCount, { color: theme.colors.textPrimary }]}>
-                      {scan.selectedCount.replace('{selected}', String(selectedItems.size)).replace('{total}', String(receipt.items.length))}{' '}
-                      <Text style={styles.linkText} onPress={toggleAllItems}>
-                        {selectedItems.size === receipt.items.length ? scan.deselectAll : scan.selectAll}
-                      </Text>
-                    </Text>
-                    <ScrollView style={styles.itemsList} nestedScrollEnabled>
-                      {editedItems.map((item, i) => (
-                        <TouchableOpacity
-                          key={`${i}-${item.amount}`}
-                          style={[
-                            styles.itemCard,
-                            { borderColor: theme.colors.gray300, backgroundColor: selectedItems.has(i) ? theme.colors.secondary : theme.colors.background },
-                          ]}
-                          onPress={() => toggleItem(i)}
-                          activeOpacity={0.8}
-                        >
-                          <View style={[styles.itemCheckbox, selectedItems.has(i) && { backgroundColor: theme.colors.primary }]}>
-                            {selectedItems.has(i) ? <Check size={14} color="#fff" /> : null}
-                          </View>
-                          <View style={styles.itemDetails}>
-                            <TextInput
-                              style={[styles.itemInput, { color: theme.colors.textPrimary }]}
-                              value={item.description}
-                              onChangeText={(v) => updateItemDescription(i, v)}
-                              onPressIn={(e) => e.stopPropagation()}
-                            />
-                            {item.quantity != null && item.quantity > 1 ? (
-                              <Text style={[styles.itemQty, { color: theme.colors.textSecondary }]}>x{item.quantity}</Text>
-                            ) : null}
-                          </View>
-                          <Text style={[styles.itemAmount, { color: theme.colors.textPrimary }]}>
-                            {currencyToUse} {(item.amount * (item.quantity ?? 1)).toFixed(2)}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </>
-                )}
-
-                <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.category}</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRow}>
-                  {categories.map((c) => (
-                    <TouchableOpacity
-                      key={c._id}
-                      style={[styles.categoryChip, categoryId === c._id && { backgroundColor: theme.colors.primary }]}
-                      onPress={() => setCategoryId(c._id)}
-                    >
-                      <Text style={[styles.categoryChipText, { color: categoryId === c._id ? '#fff' : theme.colors.textPrimary }]}>{c.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-
-                <View style={styles.fixedRow}>
-                  <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.transactionForm.fixedTransaction}</Text>
-                  <Switch value={isFixed} onValueChange={setIsFixed} trackColor={{ false: theme.colors.gray300, true: theme.colors.primary }} thumbColor="#fff" />
-                </View>
-
-                <View style={styles.buttonRow}>
-                  <TouchableOpacity style={[styles.primaryButton, { backgroundColor: theme.colors.primary }]} onPress={handleSave} disabled={isSaving}>
-                    <Text style={styles.primaryButtonText}>{isSaving ? t.common.processing : scan.saveButton}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.secondaryButton, { borderColor: theme.colors.gray300 }]} onPress={reset}>
-                    <Text style={[styles.secondaryButtonText, { color: theme.colors.textPrimary }]}>{scan.scanAnother}</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </ScrollView>
+          />
         </View>
-      </View>
-    </Modal>
+      </Modal>
+    </>
   );
 }
 
@@ -666,18 +740,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  categoryRow: {
-    marginBottom: 12,
-  },
-  categoryChip: {
+  categorySelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: 10,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    marginRight: 8,
+    paddingVertical: 13,
+    marginBottom: 8,
   },
-  categoryChipText: {
-    fontSize: 14,
+  categorySelectorText: {
+    fontSize: 15,
     fontWeight: '500',
+    flex: 1,
   },
   fixedRow: {
     flexDirection: 'row',
@@ -698,5 +774,40 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Category full-screen picker styles
+  pickerModal: {
+    flex: 1,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingTop: Platform.OS === 'ios' ? 20 : 16,
+    borderBottomWidth: 1,
+  },
+  pickerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  pickerList: {
+    paddingVertical: 8,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+  },
+  pickerItemText: {
+    fontSize: 17,
+    flex: 1,
+  },
+  pickerSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 20,
   },
 });

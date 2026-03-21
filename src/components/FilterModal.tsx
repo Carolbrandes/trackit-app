@@ -11,10 +11,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useThemeContext } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LanguageContext';
 import { useDateFormat } from '../contexts/DateFormatContext';
-import type { TransactionFilters, ApiCategory } from '../services/api';
+import { useTranslation } from '../contexts/LanguageContext';
+import { useThemeContext } from '../contexts/ThemeContext';
+import type { ApiCategory, TransactionFilters } from '../services/api';
 
 interface FilterModalProps {
   visible: boolean;
@@ -122,16 +122,19 @@ export function FilterModal({
             </TouchableOpacity>
           </View>
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-            <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.description}</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
-              value={description}
-              onChangeText={setDescription}
-              placeholder={t.filter.description}
-              placeholderTextColor={theme.colors.textSecondary}
-            />
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.description}</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
+                value={description}
+                onChangeText={setDescription}
+                placeholder={t.filter.description}
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
 
-            <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.allCategories}</Text>
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.allCategories}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
               <TouchableOpacity
                 style={[styles.chip, !category && { backgroundColor: theme.colors.primary }]}
@@ -149,8 +152,10 @@ export function FilterModal({
                 </TouchableOpacity>
               ))}
             </ScrollView>
+            </View>
 
-            <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.allTypes}</Text>
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.allTypes}</Text>
             <View style={styles.typeRow}>
               <TouchableOpacity
                 style={[styles.typeBtn, type === '' && { backgroundColor: theme.colors.primary }]}
@@ -171,8 +176,10 @@ export function FilterModal({
                 <Text style={[styles.typeBtnText, { color: type === 'expense' ? '#fff' : theme.colors.textPrimary }]}>{t.filter.expense}</Text>
               </TouchableOpacity>
             </View>
+            </View>
 
-            <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.startDate}</Text>
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.startDate}</Text>
             <TouchableOpacity
               style={[styles.dateButton, { backgroundColor: theme.colors.background, borderColor: theme.colors.gray300 }]}
               onPress={() => setShowStartPicker(true)}
@@ -216,22 +223,30 @@ export function FilterModal({
                 }}
               />
             )}
-            <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.minAmount}</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
-              value={minAmount}
-              onChangeText={setMinAmount}
-              keyboardType="decimal-pad"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
-            <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.maxAmount}</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
-              value={maxAmount}
-              onChangeText={setMaxAmount}
-              keyboardType="decimal-pad"
-              placeholderTextColor={theme.colors.textSecondary}
-            />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.minAmount}</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
+                value={minAmount}
+                onChangeText={setMinAmount}
+                keyboardType="decimal-pad"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.maxAmount}</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: theme.colors.background, color: theme.colors.textPrimary, borderColor: theme.colors.gray300 }]}
+                value={maxAmount}
+                onChangeText={setMaxAmount}
+                keyboardType="decimal-pad"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+            </View>
+
             <View style={styles.fixedRow}>
               <Text style={[styles.label, { color: theme.colors.textSecondary }]}>{t.filter.fixedOnly}</Text>
               <Switch value={fixedOnly} onValueChange={setFixedOnly} trackColor={{ false: theme.colors.gray300, true: theme.colors.primary }} thumbColor="#fff" />
@@ -283,6 +298,9 @@ const styles = StyleSheet.create({
   bodyContent: {
     padding: 16,
     paddingBottom: 24,
+  },
+  fieldGroup: {
+    marginBottom: 10,
   },
   label: {
     fontSize: 12,

@@ -342,6 +342,14 @@ export async function parseReceiptWithFile(
   clearTimeout(timeoutId);
 
   const data = (await response.json().catch(() => ({}))) as ParseReceiptResponse;
+  if (response.status === 401) {
+    await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+    const onAuthExpired = (global as { onAuthExpired?: () => void }).onAuthExpired;
+    if (typeof onAuthExpired === 'function') {
+      onAuthExpired();
+    }
+    throw new Error(data.error ?? `HTTP ${response.status}`);
+  }
   if (!response.ok) {
     throw new Error(data.error ?? `HTTP ${response.status}`);
   }

@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Camera, Plus, Filter, Pencil, Trash2 } from 'lucide-react-native';
+import { Camera, Plus, Filter, Pencil, Trash2, Check, Download } from 'lucide-react-native';
 import { useThemeContext } from '../../src/contexts/ThemeContext';
 import { useTranslation } from '../../src/contexts/LanguageContext';
 import { useUserData } from '../../src/hooks/useUserData';
@@ -28,6 +28,8 @@ import { ExpandableCard, type ExpandableCardData } from '../../src/components/Ex
 import { FilterModal } from '../../src/components/FilterModal';
 import { AddTransactionModal } from '../../src/components/AddTransactionModal';
 import { ReceiptScannerModal } from '../../src/components/ReceiptScannerModal';
+import { useCategorySeeding } from '../../src/hooks/useCategorySeeding';
+import { exportToCSV, exportToXML, exportToPDF } from '../../src/utils/exportData';
 
 const PAGE_SIZE = 10;
 
@@ -439,11 +441,24 @@ export default function TransactionsScreen() {
   const [scanModalVisible, setScanModalVisible] = useState(false);
   const [categories, setCategories] = useState<ApiCategory[]>([]);
 
+  // Bulk delete state
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+  // Export state
+  const [isExporting, setIsExporting] = useState(false);
+
+  const reloadCategories = useCallback(() => {
+    fetchCategories().then(setCategories).catch(() => {});
+  }, []);
+
   useEffect(() => {
-    if (user?._id) {
-      fetchCategories().then(setCategories).catch(() => setCategories([]));
-    }
-  }, [user?._id]);
+    if (user?._id) reloadCategories();
+  }, [user?._id, reloadCategories]);
+
+  // Auto-seed default categories for new users
+  useCategorySeeding(user?._id, reloadCategories);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -494,6 +509,110 @@ export default function TransactionsScreen() {
   const handleFilter = () => {
     setFilterModalVisible(true);
   };
+
+  // ── Bulk delete ──────────────────────────────────────────────────────────────
+
+  const enterSelectionMode = useCallback(() => {
+    setIsSelectionMode(true);
+    setSelectedIds(new Set());
+  }, []);
+
+  const exitSelectionMode = useCallback(() => {
+    setIsSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleSelectId = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleBulkDelete = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    const msg = t.bulkDelete.confirmDeleteSelected.replace('{count}', String(selectedIds.size));
+    Alert.alert(t.bulkDelete.deleteSelected, msg, [
+      { text: t.transactionForm.cancel, style: 'cancel' },
+      {
+        text: t.transactions.delete,
+        style: 'destructive',
+        onPress: async () => {
+          setIsBulkDeleting(true);
+          try {
+            await Promise.all([...selectedIds].map((id) => deleteTransaction(id)));
+            exitSelectionMode();
+            refetch();
+          } catch {
+            Alert.alert('Error', 'Some transactions could not be deleted.');
+          } finally {
+            setIsBulkDeleting(false);
+          }
+        },
+      },
+    ]);
+  }, [selectedIds, t, exitSelectionMode, refetch]);
+
+  const handleDeleteAll = useCallback(() => {
+    Alert.alert(t.bulkDelete.deleteAll, t.bulkDelete.confirmDeleteAll, [
+      { text: t.transactionForm.cancel, style: 'cancel' },
+      {
+        text: t.transactions.delete,
+        style: 'destructive',
+        onPress: async () => {
+          setIsBulkDeleting(true);
+          try {
+            await Promise.all(allTransactions.map((tx) => deleteTransaction(tx._id)));
+            exitSelectionMode();
+            refetch();
+          } catch {
+            Alert.alert('Error', 'Some transactions could not be deleted.');
+          } finally {
+            setIsBulkDeleting(false);
+          }
+        },
+      },
+    ]);
+  }, [allTransactions, t, exitSelectionMode, refetch]);
+
+  // ── Export ───────────────────────────────────────────────────────────────────
+
+  const handleExport = useCallback(() => {
+    if (allTransactions.length === 0) return;
+    const filename = `transactions_${new Date().toISOString().slice(0, 10)}`;
+    Alert.alert(t.export.title, 'Choose format:', [
+      { text: t.transactionForm.cancel, style: 'cancel' },
+      {
+        text: t.export.csv,
+        onPress: async () => {
+          setIsExporting(true);
+          try { await exportToCSV(allTransactions, filename); }
+          catch { Alert.alert('Error', t.export.error); }
+          finally { setIsExporting(false); }
+        },
+      },
+      {
+        text: t.export.xml,
+        onPress: async () => {
+          setIsExporting(true);
+          try { await exportToXML(allTransactions, filename); }
+          catch { Alert.alert('Error', t.export.error); }
+          finally { setIsExporting(false); }
+        },
+      },
+      {
+        text: t.export.pdf,
+        onPress: async () => {
+          setIsExporting(true);
+          try { await exportToPDF(allTransactions, filename); }
+          catch { Alert.alert('Error', t.export.error); }
+          finally { setIsExporting(false); }
+        },
+      },
+    ]);
+  }, [allTransactions, t]);
 
   const handleFilterReset = () => {
     const d = new Date();
@@ -643,13 +762,52 @@ export default function TransactionsScreen() {
         </ScrollView>
 
         <View style={styles.filterRow}>
-          <TouchableOpacity
-            style={[styles.filterButton, { backgroundColor: theme.colors.secondary }]}
-            onPress={handleFilter}
-            activeOpacity={0.8}
-          >
-            <Filter size={18} color={theme.colors.primary} />
-          </TouchableOpacity>
+          {isSelectionMode ? (
+            <>
+              <TouchableOpacity
+                style={[styles.filterButton, { backgroundColor: theme.colors.secondary }]}
+                onPress={exitSelectionMode}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.filterButtonText, { color: theme.colors.primary }]}>
+                  {t.bulkDelete.exitSelect}
+                </Text>
+              </TouchableOpacity>
+              <Text style={[styles.selectionCount, { color: theme.colors.textSecondary }]}>
+                {selectedIds.size} selected
+              </Text>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[styles.filterButton, { backgroundColor: theme.colors.secondary }]}
+                onPress={handleFilter}
+                activeOpacity={0.8}
+              >
+                <Filter size={18} color={theme.colors.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.filterButton, { backgroundColor: theme.colors.secondary }]}
+                onPress={handleExport}
+                activeOpacity={0.8}
+                disabled={isExporting}
+              >
+                {isExporting
+                  ? <ActivityIndicator size="small" color={theme.colors.primary} />
+                  : <Download size={18} color={theme.colors.primary} />
+                }
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.selectButton, { borderColor: theme.colors.primary }]}
+                onPress={enterSelectionMode}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.selectButtonText, { color: theme.colors.primary }]}>
+                  {t.bulkDelete.selectMode}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {txError && (
@@ -660,6 +818,7 @@ export default function TransactionsScreen() {
           <ActivityIndicator size="small" color={theme.colors.primary} style={styles.loader} />
         ) : (
           transactions.map((tx) => {
+            const isSelected = selectedIds.has(tx._id);
             const cardData: ExpandableCardData = {
               id: tx._id,
               title: tx.description,
@@ -675,38 +834,81 @@ export default function TransactionsScreen() {
               ],
             };
             return (
-              <ExpandableCard
+              <TouchableOpacity
                 key={tx._id}
-                data={cardData}
-                amountText={formatCurrency(tx.amount, selectedCurrencyCode, locale)}
-                amountColor={tx.type === 'income' ? theme.colors.success : theme.colors.danger}
-                theme={theme}
-                t={{ transactions: { seeMore: t.transactions.seeMore, seeLess: t.transactions.seeLess, edit: t.transactions.edit, delete: t.transactions.delete, date: t.transactions.date, description: t.transactions.description } }}
-                onEdit={() => openEdit(tx)}
-                onDelete={() => {
-                  Alert.alert(
-                    t.transactions.delete,
-                    t.transactions.confirmDelete,
-                    [
-                      { text: t.transactionForm.cancel, style: 'cancel' },
-                      {
-                        text: t.transactions.delete,
-                        style: 'destructive',
-                        onPress: async () => {
-                          try {
-                            await deleteTransaction(tx._id);
-                            refetch();
-                          } catch (err) {
-                            Alert.alert(t.transactions.title, err instanceof Error ? err.message : 'Error');
-                          }
-                        },
-                      },
-                    ]
-                  );
-                }}
-              />
+                activeOpacity={isSelectionMode ? 0.7 : 1}
+                onLongPress={isSelectionMode ? undefined : enterSelectionMode}
+                onPress={isSelectionMode ? () => toggleSelectId(tx._id) : undefined}
+                delayLongPress={350}
+              >
+                <View style={styles.cardWrapper}>
+                  {isSelectionMode && (
+                    <View style={[
+                      styles.checkbox,
+                      { borderColor: theme.colors.primary },
+                      isSelected && { backgroundColor: theme.colors.primary },
+                    ]}>
+                      {isSelected && <Check size={14} color="#fff" />}
+                    </View>
+                  )}
+                  <View style={styles.cardContent}>
+                    <ExpandableCard
+                      data={cardData}
+                      amountText={formatCurrency(tx.amount, selectedCurrencyCode, locale)}
+                      amountColor={tx.type === 'income' ? theme.colors.success : theme.colors.danger}
+                      theme={theme}
+                      t={{ transactions: { seeMore: t.transactions.seeMore, seeLess: t.transactions.seeLess, edit: t.transactions.edit, delete: t.transactions.delete, date: t.transactions.date, description: t.transactions.description } }}
+                      onEdit={() => openEdit(tx)}
+                      onDelete={() => {
+                        Alert.alert(
+                          t.transactions.delete,
+                          t.transactions.confirmDelete,
+                          [
+                            { text: t.transactionForm.cancel, style: 'cancel' },
+                            {
+                              text: t.transactions.delete,
+                              style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  await deleteTransaction(tx._id);
+                                  refetch();
+                                } catch (err) {
+                                  Alert.alert(t.transactions.title, err instanceof Error ? err.message : 'Error');
+                                }
+                              },
+                            },
+                          ]
+                        );
+                      }}
+                    />
+                  </View>
+                </View>
+              </TouchableOpacity>
             );
           })
+        )}
+
+        {/* Bulk action bar — visible in selection mode */}
+        {isSelectionMode && (
+          <View style={[styles.bulkBar, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.gray300 }]}>
+            <TouchableOpacity
+              style={[styles.bulkBtn, { backgroundColor: theme.colors.danger, opacity: selectedIds.size === 0 || isBulkDeleting ? 0.5 : 1 }]}
+              onPress={handleBulkDelete}
+              disabled={selectedIds.size === 0 || isBulkDeleting}
+            >
+              {isBulkDeleting
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={styles.bulkBtnText}>{t.bulkDelete.deleteSelected} ({selectedIds.size})</Text>
+              }
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.bulkBtn, styles.bulkBtnOutline, { borderColor: theme.colors.danger, opacity: isBulkDeleting ? 0.5 : 1 }]}
+              onPress={handleDeleteAll}
+              disabled={isBulkDeleting}
+            >
+              <Text style={[styles.bulkBtnTextOutline, { color: theme.colors.danger }]}>{t.bulkDelete.deleteAll}</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         <TransactionDetailModal
@@ -890,6 +1092,8 @@ const styles = StyleSheet.create({
   filterRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 8,
   },
   filterButton: {
@@ -898,6 +1102,73 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  filterButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  selectButton: {
+    height: 40,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  selectionCount: {
+    fontSize: 13,
+    flex: 1,
+    textAlign: 'center',
+  },
+  cardWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 0,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  cardContent: {
+    flex: 1,
+  },
+  bulkBar: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderTopWidth: 1,
+    marginTop: 8,
+  },
+  bulkBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bulkBtnOutline: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+  },
+  bulkBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  bulkBtnTextOutline: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   listHeader: {
     flexDirection: 'row',
